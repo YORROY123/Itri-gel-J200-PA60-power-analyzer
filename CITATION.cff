@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this project, please cite it as below."
+authors:
+  - name: YORROY123
+    alias: YORROY123
+    website: "https://github.com/YORROY123"
+title: "ItriGel J200 PA60 互動式電力數據比對工具"
+version: 1.0.0
+date-released: 2026-03-25
+url: "https://github.com/YORROY123/Itri-gel-J200-PA60-power-analyzer"
+repository-code: "https://github.com/YORROY123/Itri-gel-J200-PA60-power-analyzer"
+license: MIT
+abstract: "一個基於 Streamlit 的互動式電力數據視覺化分析工具，支援多日 CSV 資料比對、衍生欄位計算與圖表匯出。"
+keywords:
+  - streamlit
+  - power analysis
+  - data visualization
+  - plotly
+  - python
