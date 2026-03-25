@@ -4,30 +4,9 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import json
 import os
-import io
 
 st.set_page_config(page_title="電力數據分析", layout="wide")
-st.title("⚡ ItriGel J200 PA60互動式電力數據比對工具")
-
-# ── 側欄署名 ──────────────────────────────────────────
-st.sidebar.markdown(
-    """
-    <div style="text-align:center; padding: 12px 0 4px 0;">
-        <a href="https://github.com/YORROY123" target="_blank">
-            <img src="https://avatars.githubusercontent.com/YORROY123"
-                 width="72" style="border-radius:50%; border:2px solid #4CAF50;"/>
-        </a>
-        <br/>
-        <a href="https://github.com/YORROY123" target="_blank"
-           style="color:#4CAF50; font-weight:bold; text-decoration:none; font-size:14px;">
-            YORROY123
-        </a>
-        <p style="color:#888; font-size:11px; margin:2px 0 0 0;">Made by YORROY123</p>
-    </div>
-    <hr style="border-color:#333; margin: 8px 0;"/>
-    """,
-    unsafe_allow_html=True
-)
+st.title("⚡ 互動式電力數據比對工具")
 
 @st.cache_data
 def load_data(file):
@@ -35,25 +14,6 @@ def load_data(file):
     if '時間' in df.columns:
         df['時間'] = pd.to_datetime(df['時間'])
         df.set_index('時間', inplace=True)
-    return df
-
-def compute_derived_columns(df):
-    """計算衍生欄位，來源欄位缺失時自動跳過"""
-    derived = {
-        "L1_kW_total (冷庫總電)": (["L1_kW_a", "L1_kW_b", "L1_kW_c"], lambda d: d["L1_kW_a"] + d["L1_kW_b"] + d["L1_kW_c"]),
-        "L2_kW_total (壓縮機總電)": (["L2_kW_a", "L2_kW_b", "L2_kW_c"], lambda d: d["L2_kW_a"] + d["L2_kW_b"] + d["L2_kW_c"]),
-        "L3_kW_total (除霜電熱)": (["L3_kW_a", "L3_kW_b", "L3_kW_c"], lambda d: d["L3_kW_a"] + d["L3_kW_b"] + d["L3_kW_c"]),
-        "L4_除霧電熱": (["L4_V_ab", "L4_I_a"], lambda d: d["L4_V_ab"] * d["L4_I_a"] * 1.0),
-        "L4_冷凝風扇": (["L4_V_bc", "L4_I_b"], lambda d: d["L4_V_bc"] * d["L4_I_b"] * 0.83),
-        "L4_蒸發風扇": (["L4_V_ab", "L4_I_c"], lambda d: d["L4_V_ab"] * d["L4_I_c"] * 1.0),
-    }
-    for new_col, (required_cols, formula) in derived.items():
-        if all(c in df.columns for c in required_cols):
-            numeric = {c: pd.to_numeric(df[c], errors='coerce') for c in required_cols}
-            df[new_col] = formula(numeric)
-        else:
-            missing = [c for c in required_cols if c not in df.columns]
-            st.warning(f"⚠️ 無法計算 `{new_col}`，缺少欄位：{missing}")
     return df
 
 PRESETS_FILE = "presets.json"
@@ -89,7 +49,6 @@ if uploaded_files:
         
         for fname in selected_files:
             df = load_data(file_dict[fname])
-            df = compute_derived_columns(df)
             dfs[fname] = df
             for col in df.columns:
                 all_columns.append(f"{fname} - {col}")
@@ -234,7 +193,7 @@ if uploaded_files:
                 # 就算有 45 張圖，我們讓總高度動態長高 (每張圖給 300px 的高度)，這樣滑鼠滾動看才清楚
                 fig.update_layout(height=300 * len(valid_options), hovermode="x unified", dragmode="zoom", showlegend=False)
                 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
     else:
         st.info("👈 檔案已上傳！請在左側選單中選擇要分析的檔案。")
 else:
