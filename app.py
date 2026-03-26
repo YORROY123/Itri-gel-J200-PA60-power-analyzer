@@ -79,9 +79,21 @@ def compute_derived_columns(df):
     total_col = "L1_kW_total (冷庫總電)"
     verify_col = "驗算用的冷庫總電 (kW)"
     if total_col in df.columns and verify_col in df.columns:
-        df["總電誤差 (%)"] = (
-            (df[total_col] - df[verify_col]) / df[total_col] * 100
+        # 保護 1：L1 < 1.0 kW 時整個冷庫近乎無載，誤差無物理意義 → NaN
+        valid_mask = df[total_col].abs() >= 1.0
+        df["總電誤差 (%)"] = float("nan")
+        df.loc[valid_mask, "總電誤差 (%)"] = (
+            (df.loc[valid_mask, total_col] - df.loc[valid_mask, verify_col])
+            / df.loc[valid_mask, total_col] * 100
         )
+        # 保護 2：超過 ±50% 視為量測異常（L4 暫態尖峰造成）→ NaN
+        df.loc[df["總電誤差 (%)"].abs() > 50, "總電誤差 (%)"] = float("nan")
+
+    # ── 步驟 4：冷庫總電差值 (kW) ────────────────────────────────────────
+    if total_col in df.columns and verify_col in df.columns:
+        df["冷庫總電差值 (kW)"] = df[total_col] - df[verify_col]
+    else:
+        st.warning("⚠️ 無法計算 `冷庫總電差值 (kW)`，缺少冷庫總電或驗算用的冷庫總電")
     else:
         st.warning("⚠️ 無法計算 `總電誤差 (%)`，缺少冷庫總電或驗算用的冷庫總電")
 
