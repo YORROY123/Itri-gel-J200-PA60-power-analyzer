@@ -43,6 +43,7 @@ def compute_derived_columns(df):
         "L1_kW_total (冷庫總電)": (["L1_kW_a", "L1_kW_b", "L1_kW_c"], lambda d: d["L1_kW_a"] + d["L1_kW_b"] + d["L1_kW_c"]),
         "L2_kW_total (壓縮機總電)": (["L2_kW_a", "L2_kW_b", "L2_kW_c"], lambda d: d["L2_kW_a"] + d["L2_kW_b"] + d["L2_kW_c"]),
         "L3_kW_total (除霜電熱)": (["L3_kW_a", "L3_kW_b", "L3_kW_c"], lambda d: d["L3_kW_a"] + d["L3_kW_b"] + d["L3_kW_c"]),
+        # L4 三項原始值 (W)，後面再 ×0.001 轉 kW
         "L4_除霧電熱": (["L4_V_ab", "L4_I_a"], lambda d: d["L4_V_ab"] * d["L4_I_a"] * 1.0),
         "L4_冷凝風扇": (["L4_V_bc", "L4_I_b"], lambda d: d["L4_V_bc"] * d["L4_I_b"] * 0.83),
         "L4_蒸發風扇": (["L4_V_ab", "L4_I_c"], lambda d: d["L4_V_ab"] * d["L4_I_c"] * 1.0),
@@ -54,6 +55,36 @@ def compute_derived_columns(df):
         else:
             missing = [c for c in required_cols if c not in df.columns]
             st.warning(f"⚠️ 無法計算 `{new_col}`，缺少欄位：{missing}")
+
+    # ── 步驟 1：L4 三項 ×0.001 轉換為 kW ────────────────────────────────
+    for col in ["L4_除霧電熱", "L4_冷凝風扇", "L4_蒸發風扇"]:
+        if col in df.columns:
+            df[col] = df[col] * 0.001
+
+    # ── 步驟 2：驗算用的冷庫總電 (kW) ─────────────────────────────────────
+    comp_cols = {
+        "壓縮機": "L2_kW_total (壓縮機總電)",
+        "除霜":   "L3_kW_total (除霜電熱)",
+        "除霧":   "L4_除霧電熱",
+        "冷凝":   "L4_冷凝風扇",
+        "蒸發":   "L4_蒸發風扇",
+    }
+    if all(v in df.columns for v in comp_cols.values()):
+        df["驗算用的冷庫總電 (kW)"] = sum(df[c] for c in comp_cols.values())
+    else:
+        missing = [v for v in comp_cols.values() if v not in df.columns]
+        st.warning(f"⚠️ 無法計算 `驗算用的冷庫總電`，缺少欄位：{missing}")
+
+    # ── 步驟 3：總電誤差 % ────────────────────────────────────────────────
+    total_col = "L1_kW_total (冷庫總電)"
+    verify_col = "驗算用的冷庫總電 (kW)"
+    if total_col in df.columns and verify_col in df.columns:
+        df["總電誤差 (%)"] = (
+            (df[total_col] - df[verify_col]) / df[total_col] * 100
+        )
+    else:
+        st.warning("⚠️ 無法計算 `總電誤差 (%)`，缺少冷庫總電或驗算用的冷庫總電")
+
     return df
 
 PRESETS_FILE = "presets.json"

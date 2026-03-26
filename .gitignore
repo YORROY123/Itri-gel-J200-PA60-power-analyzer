@@ -1,0 +1,18 @@
+# 資料檔
+*.csv
+*.png
+*.jpg
+
+# 舊版本資料夾
+舊的 - 1/
+舊的 - 2/
+舊的/
+還沒乘以0.001的/
+
+# Python 暫存
+__pycache__/
+*.pyc
+.streamlit/
+
+# 其他雜檔
+interactive_power_distribution.html
