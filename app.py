@@ -93,6 +93,7 @@ def compute_derived_columns(df):
     # ── 步驟 5：各負載累積電能 kWh（梯形積分）────────────────────────────
     kwh_targets = {
         "L1_kW_total (冷庫總電)":    "冷庫總電 累積 (kWh)",
+        "驗算用的冷庫總電 (kW)":      "驗算冷庫總電 累積 (kWh)",
         "L2_kW_total (壓縮機總電)":  "壓縮機 累積 (kWh)",
         "L3_kW_total (除霜電熱)":    "除霜電熱 累積 (kWh)",
         "L4_除霧電熱":               "除霧耗電 累積 (kWh)",
@@ -281,7 +282,7 @@ if uploaded_files:
 
         # ── Tab 2：日報分析 ────────────────────────────────────────────────
         with tab2:
-            # 各欄位對應的「累積 kWh 欄」
+
             kwh_map = {
                 "冷庫總電":   "冷庫總電 累積 (kWh)",
                 "壓縮機":     "壓縮機 累積 (kWh)",
@@ -292,36 +293,96 @@ if uploaded_files:
             }
             verify_kwh_cols = ["壓縮機", "除霜電熱", "除霧耗電", "冷凝風扇", "蒸發風扇"]
 
+            # ── 時間範圍提示（共用側欄的 selected_time）──
+            t_start, t_end = selected_time
+            # 統一轉成 tz-naive，避免 index 有 timezone 時 loc 切不到
+            t_start_ts = pd.Timestamp(t_start).tz_localize(None)
+            t_end_ts   = pd.Timestamp(t_end).tz_localize(None)
+            duration_hrs = (t_end_ts - t_start_ts).total_seconds() / 3600
+            duration_str = f"{int(duration_hrs)}h {int((duration_hrs % 1)*60):02d}m"
+
+            # 顯示時間資訊卡
+            info_c1, info_c2, info_c3 = st.columns(3)
+            info_c1.metric("🕐 起始時間", t_start_ts.strftime('%Y-%m-%d %H:%M'))
+            info_c2.metric("🕑 終止時間", t_end_ts.strftime('%Y-%m-%d %H:%M'))
+            info_c3.metric("⏱ 總時長", duration_str)
+            st.caption("← 可在左側 X 軸滑桿調整時間範圍，數值會即時更新")
+            st.markdown("---")
+
+            # ── 計算各檔案在選定時間段內的 kWh ──────────────────────────
+            def calc_kwh_in_range(df_src, col, t0, t1):
+                """對指定欄位在 [t0, t1] 時間段做梯形積分，回傳 kWh"""
+                if col not in df_src.columns:
+                    return 0.0
+                # index 統一 tz-naive 後再切片
+                idx = df_src.index
+                if idx.tz is not None:
+                    idx = idx.tz_localize(None)
+                mask = (idx >= t0) & (idx <= t1)
+                s = pd.to_numeric(df_src[col][mask.values], errors='coerce').dropna()
+                if len(s) < 2:
+                    return 0.0
+                t_hr = s.index.tz_localize(None).astype(np.int64) / 1e9 / 3600 if s.index.tz else s.index.astype(np.int64) / 1e9 / 3600
+                dt = np.diff(t_hr.values)
+                avg_p = (s.values[:-1] + s.values[1:]) / 2
+                return float(np.sum(avg_p * dt))
+
+            src_col_map = {
+                "冷庫總電":  "L1_kW_total (冷庫總電)",
+                "壓縮機":    "L2_kW_total (壓縮機總電)",
+                "除霜電熱":  "L3_kW_total (除霜電熱)",
+                "除霧耗電":  "L4_除霧電熱",
+                "冷凝風扇":  "L4_冷凝風扇",
+                "蒸發風扇":  "L4_蒸發風扇",
+            }
+
+            # 彙整所有檔案的數據
+            all_results = {}
             for fname in selected_files:
-                df = dfs[fname]
-                st.markdown(f"### 📄 {fname}")
+                df_f = dfs[fname]
+                row = {}
+                for label, src_col in src_col_map.items():
+                    row[label] = calc_kwh_in_range(df_f, src_col, t_start_ts, t_end_ts)
+                row["驗算總電"] = sum(row[k] for k in verify_kwh_cols)
+                l1 = row["冷庫總電"]
+                row["誤差(%)"] = (l1 - row["驗算總電"]) / l1 * 100 if l1 > 0 else 0.0
+                all_results[fname] = row
 
-                # ── 取每個欄的最後一筆（累積終點）= 全天 kWh ──
-                day_kwh = {}
-                for label, col in kwh_map.items():
-                    if col in df.columns:
-                        val = pd.to_numeric(df[col], errors='coerce').dropna()
-                        day_kwh[label] = val.iloc[-1] if len(val) > 0 else 0.0
-                    else:
-                        day_kwh[label] = 0.0
+            # ── 多檔案比較模式 ─────────────────────────────────────────────
+            if len(selected_files) > 1:
+                st.subheader("多日比較總覽")
 
-                total_l1      = day_kwh.get("冷庫總電", 0.0)
-                total_verify  = sum(day_kwh[k] for k in verify_kwh_cols)
-                error_pct     = (total_l1 - total_verify) / total_l1 * 100 if total_l1 > 0 else 0.0
-
-                # ── 資訊卡 ──
-                c1, c2, c3 = st.columns(3)
-                c1.metric("🔵 冷庫總電 (L1)", f"{total_l1:.2f} kWh")
-                c2.metric("🟢 驗算總電 (各元件)", f"{total_verify:.2f} kWh")
-                c3.metric("🟠 誤差", f"{error_pct:.2f} %")
-
+                # 彙整表
+                compare_rows = []
+                for fname, row in all_results.items():
+                    compare_rows.append({
+                        "檔案":       fname,
+                        "冷庫總電(kWh)":  f"{row['冷庫總電']:.3f}",
+                        "驗算總電(kWh)":  f"{row['驗算總電']:.3f}",
+                        "誤差(%)":        f"{row['誤差(%)']:.2f}%",
+                        "壓縮機(kWh)":    f"{row['壓縮機']:.3f}",
+                        "除霜(kWh)":      f"{row['除霜電熱']:.3f}",
+                        "除霧(kWh)":      f"{row['除霧耗電']:.3f}",
+                        "冷凝(kWh)":      f"{row['冷凝風扇']:.3f}",
+                        "蒸發(kWh)":      f"{row['蒸發風扇']:.3f}",
+                    })
+                st.dataframe(compare_rows, use_container_width=True, hide_index=True)
                 st.markdown("---")
 
-                # ── 圓餅圖 + 明細表 ──
-                pie_labels = verify_kwh_cols
-                pie_values = [day_kwh[k] for k in pie_labels]
+            # ── 各檔案個別報告（往下疊）──────────────────────────────────
+            for fname in selected_files:
+                row = all_results[fname]
+                st.markdown(f"### 📄 {fname}")
 
-                col_pie, col_table = st.columns([1, 1])
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("🔵 冷庫總電", f"{row['冷庫總電']:.3f} kWh")
+                c2.metric("🟢 驗算總電", f"{row['驗算總電']:.3f} kWh")
+                c3.metric("🟠 誤差", f"{row['誤差(%)']:.2f} %")
+                c4.metric("⏱ 時長", duration_str)
+
+                col_pie, col_tbl = st.columns([1, 1])
+                pie_labels = verify_kwh_cols
+                pie_values = [row[k] for k in pie_labels]
 
                 with col_pie:
                     fig_pie = go.Figure(go.Pie(
@@ -329,27 +390,28 @@ if uploaded_files:
                         values=pie_values,
                         hole=0.35,
                         textinfo="label+percent",
-                        hovertemplate="%{label}<br>%{value:.2f} kWh<br>%{percent}<extra></extra>"
+                        hovertemplate="%{label}<br>%{value:.3f} kWh<br>%{percent}<extra></extra>"
                     ))
                     fig_pie.update_layout(
-                        height=380,
+                        height=360,
                         margin=dict(t=30, b=10, l=10, r=10),
                         showlegend=False,
                         title=dict(text="各元件耗電佔比", x=0.5)
                     )
                     st.plotly_chart(fig_pie, use_container_width=True)
 
-                with col_table:
+                with col_tbl:
                     st.markdown("**各元件耗電明細**")
-                    rows = []
+                    total_v = row["驗算總電"]
+                    tbl_rows = []
                     for label in verify_kwh_cols:
-                        kwh_val = day_kwh[label]
-                        pct = kwh_val / total_verify * 100 if total_verify > 0 else 0.0
-                        rows.append({"元件": label, "耗電 (kWh)": f"{kwh_val:.3f}", "佔比 (%)": f"{pct:.1f}%"})
-                    rows.append({"元件": "─── 合計 ───", "耗電 (kWh)": f"{total_verify:.3f}", "佔比 (%)": "100.0%"})
-                    st.dataframe(rows, use_container_width=True, hide_index=True)
+                        v = row[label]
+                        pct = v / total_v * 100 if total_v > 0 else 0.0
+                        tbl_rows.append({"元件": label, "耗電 (kWh)": f"{v:.3f}", "佔比 (%)": f"{pct:.1f}%"})
+                    tbl_rows.append({"元件": "─── 合計 ───", "耗電 (kWh)": f"{total_v:.3f}", "佔比 (%)": "100.0%"})
+                    st.dataframe(tbl_rows, use_container_width=True, hide_index=True)
 
-                st.markdown("&nbsp;")  # 多檔案間距
+                st.markdown("---")
     else:
         st.info("👈 檔案已上傳！請在左側選單中選擇要分析的檔案。")
 else:
