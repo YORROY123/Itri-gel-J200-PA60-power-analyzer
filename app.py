@@ -220,7 +220,8 @@ if uploaded_files:
             # 動態計算安全間距：確保不會超過 Plotly 的數學極限 1/(rows-1)
             # 我們抓取 0.03 或是可用空間的安全比例，取兩者中較小的那個
             if len(valid_options) > 1:
-                safe_spacing = min(0.03, 0.8 / len(valid_options))
+                # 用 (n-1) 計算才不會超過 Plotly 極限，並給至少 0.08 的間距讓標題不疊字
+                safe_spacing = min(0.08, 0.8 / (len(valid_options) - 1))
             else:
                 safe_spacing = 0.0
 
@@ -264,6 +265,8 @@ if uploaded_files:
             else:
                 # 就算有 45 張圖，我們讓總高度動態長高 (每張圖給 300px 的高度)，這樣滑鼠滾動看才清楚
                 fig.update_layout(height=300 * len(valid_options), hovermode="x unified", dragmode="zoom", showlegend=False)
+                # 子圖標題縮小，避免疊字
+                fig.update_annotations(font_size=11, font_color="gray")
                 
             st.plotly_chart(fig, width="stretch")
     else:
