@@ -299,13 +299,25 @@ if uploaded_files:
             t_start_ts = pd.Timestamp(t_start).tz_localize(None)
             t_end_ts   = pd.Timestamp(t_end).tz_localize(None)
             duration_hrs = (t_end_ts - t_start_ts).total_seconds() / 3600
-            duration_str = f"{int(duration_hrs)}h {int((duration_hrs % 1)*60):02d}m"
+            # 加上一個取樣間隔（最後一筆資料涵蓋到下一個時間點）
+            # 從資料中自動偵測取樣間隔
+            sample_hrs = 1/60  # 預設 1 分鐘
+            for fname in selected_files:
+                df_f = dfs[fname]
+                if len(df_f.index) >= 2:
+                    delta = (df_f.index[1] - df_f.index[0]).total_seconds() / 3600
+                    if delta > 0:
+                        sample_hrs = delta
+                    break
+            duration_hrs_real = duration_hrs + sample_hrs
+            duration_display = f"{int(duration_hrs_real)}h {int((duration_hrs_real % 1)*60):02d}m"
+            duration_str = duration_display
 
             # 顯示時間資訊卡
             info_c1, info_c2, info_c3 = st.columns(3)
             info_c1.metric("🕐 起始時間", t_start_ts.strftime('%Y-%m-%d %H:%M'))
             info_c2.metric("🕑 終止時間", t_end_ts.strftime('%Y-%m-%d %H:%M'))
-            info_c3.metric("⏱ 總時長", duration_str)
+            info_c3.metric("⏱ 總時長", duration_display)
             st.caption("← 可在左側 X 軸滑桿調整時間範圍，數值會即時更新")
             st.markdown("---")
 
@@ -378,7 +390,7 @@ if uploaded_files:
                 c1.metric("🔵 冷庫總電", f"{row['冷庫總電']:.3f} kWh")
                 c2.metric("🟢 驗算總電", f"{row['驗算總電']:.3f} kWh")
                 c3.metric("🟠 誤差", f"{row['誤差(%)']:.2f} %")
-                c4.metric("⏱ 時長", duration_str)
+                c4.metric("⏱ 時長", duration_display)
 
                 col_pie, col_tbl = st.columns([1, 1])
                 pie_labels = verify_kwh_cols
