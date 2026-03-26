@@ -314,15 +314,15 @@ if uploaded_files:
                 """對指定欄位在 [t0, t1] 時間段做梯形積分，回傳 kWh"""
                 if col not in df_src.columns:
                     return 0.0
-                # index 統一 tz-naive 後再切片
-                idx = df_src.index
-                if idx.tz is not None:
-                    idx = idx.tz_localize(None)
-                mask = (idx >= t0) & (idx <= t1)
-                s = pd.to_numeric(df_src[col][mask.values], errors='coerce').dropna()
+                # 把 index 轉成 tz-naive 再做比對
+                df_copy = df_src[[col]].copy()
+                if df_copy.index.tz is not None:
+                    df_copy.index = df_copy.index.tz_localize(None)
+                df_copy = df_copy.loc[t0:t1]
+                s = pd.to_numeric(df_copy[col], errors='coerce').dropna()
                 if len(s) < 2:
                     return 0.0
-                t_hr = s.index.tz_localize(None).astype(np.int64) / 1e9 / 3600 if s.index.tz else s.index.astype(np.int64) / 1e9 / 3600
+                t_hr = s.index.astype(np.int64) / 1e9 / 3600
                 dt = np.diff(t_hr.values)
                 avg_p = (s.values[:-1] + s.values[1:]) / 2
                 return float(np.sum(avg_p * dt))
