@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import json
@@ -88,6 +89,23 @@ def compute_derived_columns(df):
         df["冷庫總電差值 (kW)"] = df[total_col] - df[verify_col]
     else:
         st.warning("⚠️ 無法計算 `冷庫總電差值 (kW)`，缺少冷庫總電或驗算用的冷庫總電")
+
+    # ── 步驟 5：各負載累積電能 kWh（梯形積分）────────────────────────────
+    kwh_targets = {
+        "L1_kW_total (冷庫總電)":    "冷庫總電 累積 (kWh)",
+        "L2_kW_total (壓縮機總電)":  "壓縮機 累積 (kWh)",
+        "L3_kW_total (除霜電熱)":    "除霜電熱 累積 (kWh)",
+        "L4_除霧電熱":               "除霧耗電 累積 (kWh)",
+        "L4_冷凝風扇":               "冷凝風扇耗電 累積 (kWh)",
+        "L4_蒸發風扇":               "蒸發風扇耗電 累積 (kWh)",
+    }
+    t_hours = df.index.astype(np.int64) / 1e9 / 3600
+    for src_col, new_col in kwh_targets.items():
+        if src_col in df.columns:
+            power = pd.to_numeric(df[src_col], errors='coerce').fillna(0).values
+            dt = np.diff(t_hours.values)
+            avg_p = (power[:-1] + power[1:]) / 2
+            df[new_col] = np.concatenate([[0], np.cumsum(avg_p * dt)])
 
     return df
 
@@ -217,62 +235,121 @@ if uploaded_files:
             y_max = col2.number_input("Y 軸上限", value=y_auto_max, step=10.0)
         
         # ==========================================
-        # 🌟 開始繪圖 (加入動態安全間距)
+        # 分頁
         # ==========================================
-        if valid_options:
-            
-            # 動態計算安全間距：確保不會超過 Plotly 的數學極限 1/(rows-1)
-            # 我們抓取 0.03 或是可用空間的安全比例，取兩者中較小的那個
-            if len(valid_options) > 1:
-                # 用 (n-1) 計算才不會超過 Plotly 極限，並給至少 0.08 的間距讓標題不疊字
-                safe_spacing = min(0.08, 0.8 / (len(valid_options) - 1))
-            else:
-                safe_spacing = 0.0
+        tab1, tab2 = st.tabs(["📊 互動圖表", "📋 日報分析"])
 
-            if plot_mode == "合併顯示 (畫在同一張圖)":
-                fig = go.Figure()
-            else:
-                fig = make_subplots(
-                    rows=len(valid_options), cols=1, 
-                    shared_xaxes=True, 
-                    subplot_titles=valid_options,
-                    vertical_spacing=safe_spacing  # 🌟 改用動態計算出來的安全間距
-                )
-                
-            for i, option in enumerate(valid_options):
-                file_name, col_name = option.split(" - ", 1)
-                df = dfs[file_name]
-                
-                s = pd.to_numeric(df[col_name], errors='coerce')
-                if freq is not None:
-                    s = s.resample(freq).mean()
-                    
-                trace = go.Scatter(x=s.index, y=s, mode='lines', name=option, line=dict(width=1.5))
-                
-                if plot_mode == "合併顯示 (畫在同一張圖)":
-                    fig.add_trace(trace)
+        # ── Tab 1：原本的互動圖表 ──────────────────────────────────────────
+        with tab1:
+            if valid_options:
+                if len(valid_options) > 1:
+                    safe_spacing = min(0.08, 0.8 / (len(valid_options) - 1))
                 else:
-                    fig.add_trace(trace, row=i+1, col=1)
-            
-            # 強制所有 X 軸顯示刻度標籤與標題
-            fig.update_xaxes(
-                range=[selected_time[0], selected_time[1]],
-                showticklabels=True,      
-                title_text="時間"         
-            )
-            
-            if enable_y_axis:
-                fig.update_yaxes(range=[y_min, y_max])
-                
-            if plot_mode == "合併顯示 (畫在同一張圖)":
-                fig.update_layout(height=600, hovermode="x unified", dragmode="zoom")
-            else:
-                # 就算有 45 張圖，我們讓總高度動態長高 (每張圖給 300px 的高度)，這樣滑鼠滾動看才清楚
-                fig.update_layout(height=300 * len(valid_options), hovermode="x unified", dragmode="zoom", showlegend=False)
-                # 子圖標題縮小，避免疊字
-                fig.update_annotations(font_size=11, font_color="gray")
-                
-            st.plotly_chart(fig, width="stretch")
+                    safe_spacing = 0.0
+
+                if plot_mode == "合併顯示 (畫在同一張圖)":
+                    fig = go.Figure()
+                else:
+                    fig = make_subplots(
+                        rows=len(valid_options), cols=1,
+                        shared_xaxes=True,
+                        subplot_titles=valid_options,
+                        vertical_spacing=safe_spacing
+                    )
+
+                for i, option in enumerate(valid_options):
+                    file_name, col_name = option.split(" - ", 1)
+                    df = dfs[file_name]
+                    s = pd.to_numeric(df[col_name], errors='coerce')
+                    if freq is not None:
+                        s = s.resample(freq).mean()
+                    trace = go.Scatter(x=s.index, y=s, mode='lines', name=option, line=dict(width=1.5))
+                    if plot_mode == "合併顯示 (畫在同一張圖)":
+                        fig.add_trace(trace)
+                    else:
+                        fig.add_trace(trace, row=i+1, col=1)
+
+                fig.update_xaxes(range=[selected_time[0], selected_time[1]], showticklabels=True, title_text="時間")
+                if enable_y_axis:
+                    fig.update_yaxes(range=[y_min, y_max])
+                if plot_mode == "合併顯示 (畫在同一張圖)":
+                    fig.update_layout(height=600, hovermode="x unified", dragmode="zoom")
+                else:
+                    fig.update_layout(height=300 * len(valid_options), hovermode="x unified", dragmode="zoom", showlegend=False)
+                    fig.update_annotations(font_size=11, font_color="gray")
+                st.plotly_chart(fig, width="stretch")
+
+        # ── Tab 2：日報分析 ────────────────────────────────────────────────
+        with tab2:
+            # 各欄位對應的「累積 kWh 欄」
+            kwh_map = {
+                "冷庫總電":   "冷庫總電 累積 (kWh)",
+                "壓縮機":     "壓縮機 累積 (kWh)",
+                "除霜電熱":   "除霜電熱 累積 (kWh)",
+                "除霧耗電":   "除霧耗電 累積 (kWh)",
+                "冷凝風扇":   "冷凝風扇耗電 累積 (kWh)",
+                "蒸發風扇":   "蒸發風扇耗電 累積 (kWh)",
+            }
+            verify_kwh_cols = ["壓縮機", "除霜電熱", "除霧耗電", "冷凝風扇", "蒸發風扇"]
+
+            for fname in selected_files:
+                df = dfs[fname]
+                st.markdown(f"### 📄 {fname}")
+
+                # ── 取每個欄的最後一筆（累積終點）= 全天 kWh ──
+                day_kwh = {}
+                for label, col in kwh_map.items():
+                    if col in df.columns:
+                        val = pd.to_numeric(df[col], errors='coerce').dropna()
+                        day_kwh[label] = val.iloc[-1] if len(val) > 0 else 0.0
+                    else:
+                        day_kwh[label] = 0.0
+
+                total_l1      = day_kwh.get("冷庫總電", 0.0)
+                total_verify  = sum(day_kwh[k] for k in verify_kwh_cols)
+                error_pct     = (total_l1 - total_verify) / total_l1 * 100 if total_l1 > 0 else 0.0
+
+                # ── 資訊卡 ──
+                c1, c2, c3 = st.columns(3)
+                c1.metric("🔵 冷庫總電 (L1)", f"{total_l1:.2f} kWh")
+                c2.metric("🟢 驗算總電 (各元件)", f"{total_verify:.2f} kWh")
+                c3.metric("🟠 誤差", f"{error_pct:.2f} %")
+
+                st.markdown("---")
+
+                # ── 圓餅圖 + 明細表 ──
+                pie_labels = verify_kwh_cols
+                pie_values = [day_kwh[k] for k in pie_labels]
+
+                col_pie, col_table = st.columns([1, 1])
+
+                with col_pie:
+                    fig_pie = go.Figure(go.Pie(
+                        labels=pie_labels,
+                        values=pie_values,
+                        hole=0.35,
+                        textinfo="label+percent",
+                        hovertemplate="%{label}<br>%{value:.2f} kWh<br>%{percent}<extra></extra>"
+                    ))
+                    fig_pie.update_layout(
+                        height=380,
+                        margin=dict(t=30, b=10, l=10, r=10),
+                        showlegend=False,
+                        title=dict(text="各元件耗電佔比", x=0.5)
+                    )
+                    st.plotly_chart(fig_pie, use_container_width=True)
+
+                with col_table:
+                    st.markdown("**各元件耗電明細**")
+                    rows = []
+                    for label in verify_kwh_cols:
+                        kwh_val = day_kwh[label]
+                        pct = kwh_val / total_verify * 100 if total_verify > 0 else 0.0
+                        rows.append({"元件": label, "耗電 (kWh)": f"{kwh_val:.3f}", "佔比 (%)": f"{pct:.1f}%"})
+                    rows.append({"元件": "─── 合計 ───", "耗電 (kWh)": f"{total_verify:.3f}", "佔比 (%)": "100.0%"})
+                    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+                st.markdown("&nbsp;")  # 多檔案間距
     else:
         st.info("👈 檔案已上傳！請在左側選單中選擇要分析的檔案。")
 else:
