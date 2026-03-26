@@ -310,7 +310,9 @@ if uploaded_files:
                         sample_hrs = delta
                     break
             duration_hrs_real = duration_hrs + sample_hrs
-            duration_display = f"{int(duration_hrs_real)}h {int((duration_hrs_real % 1)*60):02d}m"
+            # 用 round 避免浮點精度問題（例如 23.99999 → 24.0）
+            total_minutes = round(duration_hrs_real * 60)
+            duration_display = f"{total_minutes // 60}h {total_minutes % 60:02d}m"
             duration_str = duration_display
 
             # 顯示時間資訊卡
