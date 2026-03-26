@@ -89,13 +89,14 @@ def compute_derived_columns(df):
         # 保護 2：超過 ±50% 視為量測異常（L4 暫態尖峰造成）→ NaN
         df.loc[df["總電誤差 (%)"].abs() > 50, "總電誤差 (%)"] = float("nan")
 
+    else:
+        st.warning("⚠️ 無法計算 `總電誤差 (%)`，缺少冷庫總電或驗算用的冷庫總電")
+
     # ── 步驟 4：冷庫總電差值 (kW) ────────────────────────────────────────
     if total_col in df.columns and verify_col in df.columns:
         df["冷庫總電差值 (kW)"] = df[total_col] - df[verify_col]
     else:
         st.warning("⚠️ 無法計算 `冷庫總電差值 (kW)`，缺少冷庫總電或驗算用的冷庫總電")
-    else:
-        st.warning("⚠️ 無法計算 `總電誤差 (%)`，缺少冷庫總電或驗算用的冷庫總電")
 
     return df
 
